@@ -9,6 +9,8 @@ from collections import OrderedDict
 
 import torch
 import torchvision
+import numpy as np
+import json
 
 from external.dada.flag_holder import FlagHolder
 from external.dada.metric import MetricDict
@@ -67,6 +69,10 @@ def test(**kwargs):
 
     # test
     for fold in fold_set:
+
+        predictions = []
+        selections = []
+
         test_loader = torch.utils.data.DataLoader(fold, batch_size=FLAGS.batch_size, shuffle=False, num_workers=FLAGS.num_workers, pin_memory=True)
 
         # model
@@ -109,8 +115,21 @@ def test(**kwargs):
                 loss_dict['loss'] = loss.detach().cpu().item()
 
                 # evaluation
-                evaluator = Evaluator(out_class.detach(), t.detach(), out_select.detach())
+                selection_out = out_class.detach() 
+                evaluator = Evaluator(selection_out, t.detach(), out_select.detach())
                 loss_dict.update(evaluator())
+
+                # collect predictions
+                prediction_result = out_class.detach().argmax(dim=1)
+
+                # collect selections
+                t = t.detach()
+                condition = (out_select >= 0.5)
+                selection_result = torch.where(condition, torch.ones_like(out_select), torch.zeros_like(out_select)).view(-1)
+                # a 1 is a non-rejection
+
+                predictions.append(prediction_result.cpu().numpy())
+                selections.append(selection_result.cpu().numpy())
 
                 test_metric_dict.update(loss_dict)
 
@@ -118,10 +137,12 @@ def test(**kwargs):
         print_metric_dict(None, None, test_metric_dict.avg, mode='test')
         accumulative_metrics.update(test_metric_dict.avg)
 
-    avg_metrics_across_folds = accumulative_metrics.avg
+        # save predictions and selections for the fold
+        np.save(f'{FLAGS.weight}/predictions_{fold.fold_name}.npy', np.concatenate(predictions))
+        np.save(f'{FLAGS.weight}/selections_{fold.fold_name}.npy', np.concatenate(selections))
 
-    # Print the average metrics
-    print("Average Metrics Across Folds:", avg_metrics_across_folds)
+    with open(f"{FLAGS.weight}/across_folds.json", "w") as outfile: 
+        json.dump(accumulative_metrics.avg, outfile)
 
 
 if __name__ == '__main__':
