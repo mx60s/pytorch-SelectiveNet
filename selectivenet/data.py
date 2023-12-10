@@ -5,9 +5,57 @@ base = os.path.join(os.path.dirname(os.path.abspath(__file__)), '../')
 sys.path.append(base)
 
 from collections import namedtuple
+import csv
+import json
+import numpy as np
 
 import torch
 import torchvision
+from torch.utils.data import Dataset
+
+def read_csv(csv_file_path):
+    filenames = []
+    with open(csv_file_path, mode='r') as file:
+        reader = csv.reader(file)
+        next(reader)
+        for row in reader:
+            if len(row) >= 2:
+                filenames.append(row[1])
+
+    return filenames
+
+class EmbeddingsDataset(Dataset):
+    def __init__(self, data_dir, fold_name, vocab_file='labelvocabulary.csv'):
+        vocab_path = os.path.join(data_dir, vocab_file)
+        
+        if os.path.exists(vocab_path):
+            self.vocab_list = read_csv(vocab_path)
+        else:
+            raise Exception("Data folder must contain a valid vocab index csv file")
+
+        fold_label_file = fold_name + '.json'
+        label_path = os.path.join(data_dir, fold_label_file)
+    
+        with open(label_path, mode='r') as file:
+            data = json.load(file)
+            
+        self.samples = list(data.keys())
+        
+        self.fold_name = fold_name
+        self.data_dir = data_dir
+
+    def __len__(self):
+        return len(self.samples)
+
+    def __getitem__(self, idx):
+        sample = self.samples[idx] + '.embedding.npy'
+        embed_path = os.path.join(self.data_dir, self.fold_name, sample)
+        embeddings = np.load(embed_path)
+        
+        embeddings = torch.from_numpy(embeddings)
+        label = torch.tensor(int(sample[:3]), dtype=torch.long)
+        return [embeddings, label]
+
 
 class DatasetBuilder(object):
     # tuple for dataset config

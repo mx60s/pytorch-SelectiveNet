@@ -12,6 +12,13 @@ You will need the following to run the codes:
 
 Note that I run the code with Ubuntu 18, Pytorch 1.2.0, CUDA 10.1
 
+### Maggie Training/Testing
+```bash
+python3 train.py --dataroot ../data/vocal_imitation-v1.1.3-full/ --log_dir ../logs/vocal-imitation/100c --coverage 1.0 --lr 0.0032 --num_epochs 100
+
+python3 test.py -w ../logs/vocal-imitation/100c/ --weight_prefix weight_final_ --dataroot ../data/vocal_imitation-v1.1.3-full/ --coverage 1.0
+```
+
 ### Training
 Use `scripts/train.py` to train the network. Example usage:
 ```bash

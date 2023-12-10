@@ -56,7 +56,7 @@ class Logger(object):
             datadict[k] = v
 
         new_df = pandas.DataFrame(datadict, index=[self.row_idx])
-        self.df = self.df.append(new_df, sort=False)
+        self.df = pandas.concat([self.df, new_df], sort=False)
 
         self._save()
         self.row_idx += 1
