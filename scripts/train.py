@@ -18,7 +18,7 @@ from external.dada.logger import Logger
 
 from selectivenet.heareval import HearEvalNN
 from selectivenet.model import SelectiveNet
-from selectivenet.loss import SelectiveLoss
+from selectivenet.loss import SelectiveLoss, OneHotToCrossEntropyLoss
 from selectivenet.data import EmbeddingsDataset
 from selectivenet.evaluator import Evaluator
 
@@ -35,7 +35,7 @@ from selectivenet.evaluator import Evaluator
 @click.option('--normalize', is_flag=True, default=True)
 # optimization
 @click.option('--num_epochs', type=int, default=100)
-@click.option('--lr', type=float, default=0.1, help='learning rate')
+@click.option('--lr', type=float, default=0.00032, help='learning rate')
 @click.option('--wd', type=float, default=5e-4, help='weight decay')
 @click.option('--momentum', type=float, default=0.9)
 # loss
@@ -44,7 +44,6 @@ from selectivenet.evaluator import Evaluator
 # logging
 @click.option('-s', '--suffix', type=str, default='')
 @click.option('-l', '--log_dir', type=str, required=True)
-
 
 def main(**kwargs):
     train(**kwargs)
@@ -75,10 +74,12 @@ def train(**kwargs):
     params = model.parameters() 
     optimizer = torch.optim.Adam(params, lr=FLAGS.lr)
     #scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=25, gamma=0.5)
+    # heareval doesn't use a scheduler
 
     # loss
-    base_loss = torch.nn.CrossEntropyLoss(reduction='none')
+    base_loss = torch.nn.CrossEntropyLoss()#(reduction='none')
     SelectiveCELoss = SelectiveLoss(base_loss, coverage=FLAGS.coverage)
+    MyLoss = OneHotToCrossEntropyLoss()
 
     # logger
     train_logger = Logger(path=os.path.join(FLAGS.log_dir,'train_log{}.csv'.format(FLAGS.suffix)), mode='train')
@@ -97,23 +98,24 @@ def train(**kwargs):
             model.train()
             x = x.to('cuda', non_blocking=True)
             t = t.to('cuda', non_blocking=True)
-
             # forward
-            out_class, out_select, out_aux = model(x)
+            #out_class, out_select, out_aux = model(x)
+            out_aux = model.forward_logit(x)
+            
 
             # compute selective loss
             loss_dict = OrderedDict()
             # loss dict includes, 'empirical_risk' / 'emprical_coverage' / 'penulty'
-            selective_loss, loss_dict = SelectiveCELoss(out_class, out_select, t)
-            selective_loss *= FLAGS.alpha
-            loss_dict['selective_loss'] = selective_loss.detach().cpu().item()
+            #selective_loss, loss_dict = SelectiveCELoss(out_class, out_select, t)
+            #selective_loss *= FLAGS.alpha
+            #loss_dict['selective_loss'] = selective_loss.detach().cpu().item()
             # compute standard cross entropy loss
-            ce_loss = torch.nn.CrossEntropyLoss()(out_aux, t)
-            ce_loss *= (1.0 - FLAGS.alpha)
+            ce_loss = base_loss(out_aux, t)
+            #ce_loss *= (1.0 - FLAGS.alpha)
             loss_dict['ce_loss'] = ce_loss.detach().cpu().item()
             
             # total loss
-            loss = selective_loss + ce_loss
+            loss = ce_loss #selective_loss + ce_loss
             loss_dict['loss'] = loss.detach().cpu().item()
 
             # backward
@@ -131,26 +133,28 @@ def train(**kwargs):
                 t = t.to('cuda', non_blocking=True)
 
                 # forward
-                out_class, out_select, out_aux = model(x)
-
+                #out_class, out_select, out_aux = model(x)
+                out_aux = model.forward_logit(x)
+                #pred = model.activation(out_aux, dim=1)
                 # compute selective loss
                 loss_dict = OrderedDict()
                 # loss dict includes, 'empirical_risk' / 'emprical_coverage' / 'penulty'
-                selective_loss, loss_dict = SelectiveCELoss(out_class, out_select, t)
-                selective_loss *= FLAGS.alpha
-                loss_dict['selective_loss'] = selective_loss.detach().cpu().item()
+                #selective_loss, loss_dict = SelectiveCELoss(out_class, out_select, t)
+                #selective_loss *= FLAGS.alpha
+                #loss_dict['selective_loss'] = selective_loss.detach().cpu().item()
                 # compute standard cross entropy loss
-                ce_loss = torch.nn.CrossEntropyLoss()(out_aux, t)
-                ce_loss *= (1.0 - FLAGS.alpha)
+                #ce_loss = torch.nn.CrossEntropyLoss()(out_aux, t)
+                #ce_loss *= (1.0 - FLAGS.alpha)
+                ce_loss = base_loss(out_aux, t)
                 loss_dict['ce_loss'] = ce_loss.detach().cpu().item()
                 
                 # total loss
-                loss = selective_loss + ce_loss
+                loss = ce_loss #selective_loss + ce_loss
                 loss_dict['loss'] = loss.detach().cpu().item()
 
                 # evaluation
-                evaluator = Evaluator(out_class.detach(), t.detach(), out_select.detach())
-                loss_dict.update(evaluator())
+                #evaluator = Evaluator(out_class.detach(), t.detach(), out_select.detach())
+                #loss_dict.update(evaluator())
 
                 val_metric_dict.update(loss_dict)
 

@@ -45,3 +45,18 @@ class SelectiveLoss(torch.nn.Module):
         loss_dict['penulty'] = penulty.detach().cpu().item()
 
         return selective_loss, loss_dict
+
+
+class OneHotToCrossEntropyLoss(torch.nn.Module):
+    def __init__(self):
+        super(OneHotToCrossEntropyLoss, self).__init__()
+        self.loss = torch.nn.CrossEntropyLoss()
+
+    def forward(self, y_hat: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
+        # One and only one label per class
+        assert torch.all(
+            torch.sum(y, dim=1) == torch.ones(y.shape[0], device=self.device)
+        )
+        y = y.argmax(dim=1)
+        return self.loss(y_hat, y)
+

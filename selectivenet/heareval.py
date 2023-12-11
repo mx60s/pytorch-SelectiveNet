@@ -23,7 +23,7 @@ class HearEvalNN(nn.Module):
     def _init_weights(self):
         for layer in self.layers:
             if isinstance(layer, nn.Linear):
-                nn.init.xavier_uniform_(layer.weight)
+                nn.init.xavier_normal_(layer.weight)
 
     def forward(self, x):
         for layer in self.layers:

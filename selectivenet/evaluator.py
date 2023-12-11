@@ -43,7 +43,6 @@ class Evaluator(object):
             eval_dict.update(eval_dict_cls)
 
         else:
-            print('rejection')
             # add evaluation for classification
             eval_dict_cls = self._evaluate_multi_classification_with_rejection(self.prediction_result, self.t, self.selection_result)
             eval_dict.update(eval_dict_cls)
@@ -66,9 +65,6 @@ class Evaluator(object):
         """
         assert h.size(0) == t.size(0) > 0
         assert len(h.size()) == len(t.size()) == 1
-        
-        print('predicted:', h)
-        print('correct:', t)
 
         t = float(torch.where(h==t, torch.ones_like(h), torch.zeros_like(h)).sum())
         f = float(torch.where(h!=t, torch.ones_like(h), torch.zeros_like(h)).sum())
@@ -216,8 +212,3 @@ if __name__ == '__main__':
             eval_dict.update(evaluator())
             print(eval_dict)
             
-
-
-            
-            
-

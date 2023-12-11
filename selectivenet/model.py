@@ -1,4 +1,5 @@
 import torch
+import torch.nn.functional as F
 
 class SelectiveNet(torch.nn.Module):
     """
@@ -19,7 +20,7 @@ class SelectiveNet(torch.nn.Module):
         
         # represented as f() in the original paper
         self.classifier = torch.nn.Sequential(
-            torch.nn.Linear(self.dim_features, self.num_classes)
+            torch.nn.Linear(self.dim_features, self.num_classes),
         )
 
         # represented as g() in the original paper
@@ -33,24 +34,34 @@ class SelectiveNet(torch.nn.Module):
 
         # represented as h() in the original paper
         self.aux_classifier = torch.nn.Sequential(
-            torch.nn.Linear(self.dim_features, self.num_classes)
+            torch.nn.Linear(self.dim_features, self.num_classes),
         )
 
+        self.activation = torch.nn.Softmax()
+
         # initialize weights of heads
+        init_weights = None
         if init_weights:
             self._initialize_weights(self.classifier)
             self._initialize_weights(self.selector)
             self._initialize_weights(self.aux_classifier)
 
-    def forward(self, x):
+    def forward_logit(self, x):
         x = self.features(x)
         #x = x.view(x.size(0), -1)
         
-        prediction_out = self.classifier(x)
-        selection_out  = self.selector(x)
+        #prediction_out = self.classifier(x)
+        #selection_out  = self.selector(x)
         auxiliary_out  = self.aux_classifier(x)
 
-        return prediction_out, selection_out, auxiliary_out
+        return auxiliary_out #prediction_out, selection_out, auxiliary_out
+
+    def forward(self, x):
+        x = self.forward_logit(x)
+        return self.activation(x, dim=1)
+
+    # you coudl redefine the above to forward_logit and then have a forward with the softma
+    # it could be, then, that your scoring is wrong, but there's probably more
 
     def _initialize_weights(self, module):
         for m in module.modules():
@@ -64,15 +75,3 @@ class SelectiveNet(torch.nn.Module):
             elif isinstance(m, torch.nn.Linear):
                 torch.nn.init.normal_(m.weight, 0, 0.01)
                 torch.nn.init.constant_(m.bias, 0)
-
-if __name__ == '__main__':
-    import os
-    import sys
-
-    base = os.path.join(os.path.dirname(os.path.abspath(__file__)), '../')
-    sys.path.append(base)
-
-    from selectivenet.vgg_variant import vgg16_variant
-
-    features = vgg16_variant(32,0.3).cuda()
-    model = SelectiveNet(features,512,10).cuda()
