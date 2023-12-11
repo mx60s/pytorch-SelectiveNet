@@ -27,7 +27,7 @@ from selectivenet.evaluator import Evaluator
 
 @click.command()
 # model
-@click.option('--dim_features', type=int, default=768)
+@click.option('--dim_features', type=int, default=1024)
 @click.option('--dropout_prob', type=float, default=0.1)
 @click.option('-w', '--weight', type=str, required=True, help='model weight directory')
 @click.option('--weight_prefix', type=str, required=True, help='prefix of each model weight')
@@ -56,92 +56,88 @@ def test(**kwargs):
         torch.cuda.manual_seed_all(seed)  # for multi-GPU.
 
     # dataset
-    fold00 = EmbeddingsDataset(FLAGS.dataroot, fold_name='fold00')
-    fold01 = EmbeddingsDataset(FLAGS.dataroot, fold_name='fold01')
-    fold02 = EmbeddingsDataset(FLAGS.dataroot, fold_name='fold02')
+    test = EmbeddingsDataset(FLAGS.dataroot, fold_name='test')
 
-    fold_set = set([fold00, fold01, fold02])
+    print(len(test))
 
-    num_classes = 302
+    num_classes = 12
     hidden_dim = 1024
 
     accumulative_metrics = MetricDict()
 
     # test
-    for fold in fold_set:
+    predictions = []
+    selections = []
 
-        predictions = []
-        selections = []
+    test_loader = torch.utils.data.DataLoader(test, batch_size=FLAGS.batch_size, shuffle=False, num_workers=FLAGS.num_workers, pin_memory=True)
 
-        test_loader = torch.utils.data.DataLoader(fold, batch_size=FLAGS.batch_size, shuffle=False, num_workers=FLAGS.num_workers, pin_memory=True)
+    # model
+    features = HearEvalNN(input_dim=FLAGS.dim_features)
+    model = SelectiveNet(features, hidden_dim, num_classes).cuda()
+    model_path = os.path.join(FLAGS.weight, f'{FLAGS.weight_prefix}.pth')
+    load_model(model, model_path)
 
-        # model
-        features = HearEvalNN(input_dim=FLAGS.dim_features)
-        model = SelectiveNet(features, hidden_dim, num_classes).cuda()
-        model_path = os.path.join(FLAGS.weight, f'{FLAGS.weight_prefix}{fold.fold_name}.pth')
-        load_model(model, model_path)
+    if torch.cuda.device_count() > 1: model = torch.nn.DataParallel(model)
 
-        if torch.cuda.device_count() > 1: model = torch.nn.DataParallel(model)
+    # loss
+    base_loss = torch.nn.CrossEntropyLoss(reduction='none')
+    SelectiveCELoss = SelectiveLoss(base_loss, coverage=FLAGS.coverage)
 
-        # loss
-        base_loss = torch.nn.CrossEntropyLoss(reduction='none')
-        SelectiveCELoss = SelectiveLoss(base_loss, coverage=FLAGS.coverage)
-    
-        # pre epoch
-        test_metric_dict = MetricDict()
+    # pre epoch
+    test_metric_dict = MetricDict()
 
-        # test
-        model.eval()
-        with torch.autograd.no_grad():
-            for i, (x,t) in enumerate(test_loader):
-                x = x.to('cuda', non_blocking=True)
-                t = t.to('cuda', non_blocking=True)
+    # test
+    model.eval()
+    with torch.autograd.no_grad():
+        for i, (x,t) in enumerate(test_loader):
+            x = x.to('cuda', non_blocking=True)
+            t = t.to('cuda', non_blocking=True)
 
-                # forward
-                out_class, out_select, out_aux = model(x)
+            # forward
+            out_class, out_select, out_aux = model(x)
 
-                # compute selective loss
-                loss_dict = OrderedDict()
-                # loss dict includes, 'empirical_risk' / 'emprical_coverage' / 'penulty'
-                selective_loss, loss_dict = SelectiveCELoss(out_class, out_select, t)
-                selective_loss *= FLAGS.alpha
-                loss_dict['selective_loss'] = selective_loss.detach().cpu().item()
-                # compute standard cross entropy loss
-                ce_loss = torch.nn.CrossEntropyLoss()(out_aux, t)
-                ce_loss *= (1.0 - FLAGS.alpha)
-                loss_dict['ce_loss'] = ce_loss.detach().cpu().item()
-                # total loss
-                loss = selective_loss + ce_loss
-                loss_dict['loss'] = loss.detach().cpu().item()
+            # compute selective loss
+            loss_dict = OrderedDict()
+            # loss dict includes, 'empirical_risk' / 'emprical_coverage' / 'penulty'
+            selective_loss, loss_dict = SelectiveCELoss(out_class, out_select, t)
+            selective_loss *= FLAGS.alpha
+            loss_dict['selective_loss'] = selective_loss.detach().cpu().item()
+            # compute standard cross entropy loss
+            ce_loss = torch.nn.CrossEntropyLoss()(out_aux, t)
+            ce_loss *= (1.0 - FLAGS.alpha)
+            loss_dict['ce_loss'] = ce_loss.detach().cpu().item()
+            # total loss
+            loss = selective_loss + ce_loss
+            loss_dict['loss'] = loss.detach().cpu().item()
 
-                # evaluation
-                selection_out = out_class.detach() 
-                evaluator = Evaluator(selection_out, t.detach(), out_select.detach())
-                loss_dict.update(evaluator())
+            # evaluation
+            selection_out = out_class.detach() 
+            evaluator = Evaluator(selection_out, t.detach(), out_select.detach())
+            loss_dict.update(evaluator())
 
-                # collect predictions
-                prediction_result = out_class.detach().argmax(dim=1)
+            # collect predictions
+            prediction_result = out_class.detach().argmax(dim=1)
 
-                # collect selections
-                t = t.detach()
-                condition = (out_select >= 0.5)
-                selection_result = torch.where(condition, torch.ones_like(out_select), torch.zeros_like(out_select)).view(-1)
-                # a 1 is a non-rejection
+            # collect selections
+            t = t.detach()
+            condition = (out_select >= 0.5)
+            selection_result = torch.where(condition, torch.ones_like(out_select), torch.zeros_like(out_select)).view(-1)
+            # a 1 is a non-rejection
 
-                predictions.append(prediction_result.cpu().numpy())
-                selections.append(selection_result.cpu().numpy())
+            predictions.append(prediction_result.cpu().numpy())
+            selections.append(selection_result.cpu().numpy())
 
-                test_metric_dict.update(loss_dict)
+            test_metric_dict.update(loss_dict)
 
-        # post epoch
-        print_metric_dict(None, None, test_metric_dict.avg, mode='test')
-        accumulative_metrics.update(test_metric_dict.avg)
+    # post epoch
+    print_metric_dict(None, None, test_metric_dict.avg, mode='test')
+    accumulative_metrics.update(test_metric_dict.avg)
 
-        # save predictions and selections for the fold
-        np.save(f'{FLAGS.weight}/predictions_{fold.fold_name}.npy', np.concatenate(predictions))
-        np.save(f'{FLAGS.weight}/selections_{fold.fold_name}.npy', np.concatenate(selections))
+    # save predictions and selections for the fold
+    np.save(f'{FLAGS.weight}/predictions.npy', np.concatenate(predictions))
+    np.save(f'{FLAGS.weight}/selections.npy', np.concatenate(selections))
 
-    with open(f"{FLAGS.weight}/across_folds.json", "w") as outfile: 
+    with open(f"{FLAGS.weight}/test.json", "w") as outfile: 
         json.dump(accumulative_metrics.avg, outfile)
 
 

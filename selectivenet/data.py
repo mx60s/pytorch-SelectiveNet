@@ -30,6 +30,7 @@ class EmbeddingsDataset(Dataset):
         
         if os.path.exists(vocab_path):
             self.vocab_list = read_csv(vocab_path)
+            print(self.vocab_list)
         else:
             raise Exception("Data folder must contain a valid vocab index csv file")
 
@@ -39,7 +40,7 @@ class EmbeddingsDataset(Dataset):
         with open(label_path, mode='r') as file:
             data = json.load(file)
             
-        self.samples = list(data.keys())
+        self.samples = list(data.items())
         
         self.fold_name = fold_name
         self.data_dir = data_dir
@@ -48,14 +49,19 @@ class EmbeddingsDataset(Dataset):
         return len(self.samples)
 
     def __getitem__(self, idx):
-        sample = self.samples[idx] + '.embedding.npy'
+        sample = self.samples[idx][0] + '.embedding.npy'
         embed_path = os.path.join(self.data_dir, self.fold_name, sample)
         embeddings = np.load(embed_path)
         
         embeddings = torch.from_numpy(embeddings)
-        label = torch.tensor(int(sample[:3]), dtype=torch.long)
+        label_name = self.samples[idx][1][0]
+        label = torch.tensor(self.vocab_list.index(label_name), dtype=torch.long)
         return [embeddings, label]
 
+
+
+# _unknown_
+# _unknown_
 
 class DatasetBuilder(object):
     # tuple for dataset config
